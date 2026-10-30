@@ -1,0 +1,8 @@
+# GenLayer Intelligent Contract - Procurement Evidence Verifier (PEV)
+#
+# NOTE: No dependencies are pinned here because the GenLayer SDK (`genlayer`)
+# and testing tool (`gltest`) have not been verified as available for Python
+# 3.14.6 on this environment (Android Termux ARM).
+#
+# Refer to official GenLayer documentation for installation instructions
+# and package availability.
