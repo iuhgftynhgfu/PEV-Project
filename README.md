@@ -294,3 +294,41 @@ The license for this project has not been determined. No LICENSE file is include
 ---
 
 **Important**: This contract evaluates textual evidence only. It does not certify real-world compliance, legal validity, or security of vendor proposals. All evaluations are subject to GenLayer's equivalence principle and should be reviewed by human reviewers for final decisions.
+## Manual GenLayer Studio Results (PEV-M01–PEV-M13)
+
+All cases below were executed against the already deployed V4 contract.
+These are documentation-only test records; the deployed contract was not modified.
+
+| Case | Scenario | Studio execution | Observed result | Assessment |
+|---|---|---|---|---|
+| M01 | AES-256 scope ambiguity | FINALIZED / SUCCESS / MAJORITY_AGREE | REVIEW, partial, relevant | PASS — expected review |
+| M02 | Explicit SAML contradiction | FINALIZED / SUCCESS / MAJORITY_AGREE | REJECT, contradicted | PASS |
+| M03 | Log retention duration missing | FINALIZED / SUCCESS / MAJORITY_AGREE | REVIEW, insufficient | PASS |
+| M04 | Candidate quote absent | FINALIZED / SUCCESS / MAJORITY_AGREE | REVIEW; quote_exists=false | PASS |
+| M05 | Irrelevant AES quote for API versioning | FINALIZED / SUCCESS / MAJORITY_AGREE | REJECT, irrelevant | PASS |
+| M06 | Explicit SSO support | FINALIZED / SUCCESS / MAJORITY_AGREE | ACCEPT, supported | PASS |
+| M07 | Uptime target missing | FINALIZED / SUCCESS / MAJORITY_AGREE | REVIEW, insufficient | PASS |
+| M08 | Explicit plaintext contradiction | FINALIZED / SUCCESS / MAJORITY_AGREE | REJECT, contradicted | PASS |
+| M09 | Malformed LLM response | Not demonstrated | Requires malformed model output and UserError evidence | NOT VERIFIED |
+| M10 | Missing required LLM fields | Not demonstrated | Requires missing-field model output and UserError evidence | NOT VERIFIED |
+| M11 | Validator disagreement / False verdict | FINALIZED / SUCCESS / MAJORITY_AGREE | ACCEPT; no confirmed final False verdict | TARGET NOT VERIFIED |
+| M12 | Oversized proposal (50,001 chars) | FINALIZED / ERROR | UserError: proposal exceeds maximum length; no output | PASS |
+| M13 | Ambiguous requirement | FINALIZED / SUCCESS / MAJORITY_AGREE | REVIEW, partial, relevant | EXPECTATION MISMATCH |
+
+For M01–M08, the recorded `get_evaluation` results matched the corresponding
+`compute` outputs. M11 also had a matching stored evaluation, but its intended
+validator-False behavior was not demonstrated. M13 completed successfully at
+the execution and storage levels, but returned `partial` rather than the
+expected `ambiguous`; it must not be counted as a full expected-behavior pass.
+
+Important interpretation notes:
+- In M03, `quote_exists=true` means the candidate sentence was found literally;
+  `evidence_found=false` means it did not establish the required 90-day period.
+- In M08, `quote_exists=true` and `evidence_found=false` are compatible: the
+  quote exists, but it is evidence contradicting the requirement.
+- In M05, the observed output included `review_required=true` alongside
+  `decision=reject`; this is recorded as observed, not silently normalized.
+- M12 ended with transaction status FINALIZED but execution result ERROR.
+  FINALIZED does not mean the contract call succeeded.
+- M09 and M10 remain unverified because ordinary inputs do not guarantee
+  malformed or incomplete LLM output.

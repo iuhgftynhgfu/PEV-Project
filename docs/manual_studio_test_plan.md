@@ -142,3 +142,28 @@ against a running GenLayer Studio environment.
 - They require a running GenLayer Studio environment with validator nodes.
 - Results should be recorded after execution and compared against expected values.
 - MAJORITY_AGREE, storage, and retrieval behavior should be verified during execution.
+## Execution Record Addendum — PEV-M01 to PEV-M13
+
+The following records supplement the planned cases with observed Studio
+results. They do not change the deployed contract or the original test inputs.
+
+- M01–M08: Studio execution finalized successfully with MAJORITY_AGREE.
+  Their observed decisions and assessments are summarized in the README.
+- M09: NOT VERIFIED. A malformed LLM response and the resulting UserError
+  were not demonstrated.
+- M10: NOT VERIFIED. An LLM response missing required fields and the resulting
+  UserError were not demonstrated.
+- M11: TARGET NOT VERIFIED. The transaction finalized successfully and its
+  evaluation was stored/retrieved, but no final validator verdict of False
+  was confirmed. Some validator attempts errored; the final outcome was
+  MAJORITY_AGREE.
+- M12: PASS. A proposal of exactly 50,001 characters produced
+  `proposal exceeds maximum length`; the transaction was FINALIZED with
+  execution Result ERROR and Output None.
+- M13: EXECUTION PASS / EXPECTATION MISMATCH. The transaction finalized
+  successfully with MAJORITY_AGREE and the stored evaluation matched the
+  compute output. The observed assessment was `partial`, not the expected
+  `ambiguous`; the decision was `review` and `review_required` was true.
+
+Do not count M09, M10, or the target behavior of M11 as verified passes.
+Do not count M13 as a full expected-behavior pass.
