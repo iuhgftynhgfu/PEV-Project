@@ -204,35 +204,26 @@ The following 4 tests **errored at import** and did not reach their decision-tab
 
 Each fails at `from contracts.pev_contract import PEVContract`, which triggers `from genlayer import *` (contract line 4) and raises `ModuleNotFoundError: No module named 'genlayer'`. This is a **missing-dependency error at import time** — it is **neither a logical failure nor a pass** of the `_compute_decision` decision table. The decision-table logic itself was not executed in this environment.
 
-### Manual Studio Test Plan (Not Executed)
+### Manual GenLayer Studio Tests — Executed Results
 
-The following 13 test cases are documented in `docs/manual_studio_test_plan.md` and require a running GenLayer Studio environment with validator nodes:
+The 13 planned Studio cases have now been exercised against the deployed V4
+contract. Detailed observed outputs and limitations are recorded in the
+**Manual GenLayer Studio Results (PEV-M01–PEV-M13)** section below.
 
-| # | Test Case | Expected Outcome |
-|---|-----------|------------------|
-| 1 | ACCEPT — Direct supporting evidence | `evidence_assessment="supported"`, `decision="accept"` |
-| 2 | REJECT — Contradictory evidence | `evidence_assessment="contradicted"`, `decision="reject"` |
-| 3 | REVIEW — Partial support | `evidence_assessment="partial"`, `decision="review"` |
-| 4 | Fabricated quote | `quote_exists=False` |
-| 5 | Quote from unrelated section | `quote_exists=True`, `evidence_assessment="insufficient"` |
-| 6 | Prompt injection — false positive | `quote_exists=True`, `evidence_assessment` based on LLM eval |
-| 7 | Prompt injection — fabricated quote | `quote_exists=False` (not in proposal text) |
-| 8 | Conflicting evidence | `quote_exists=True`, `evidence_assessment` based on LLM eval |
-| 9 | Malformed LLM response | `gl.vm.UserError` raised; `compute()` aborts, so no evaluation result (and thus no `review_required` value) is stored for that execution |
-| 10 | Missing required fields | `gl.vm.UserError` raised |
-| 11 | Validator disagreement | Intended to observe runtime behavior when a validator verdict is `False`; this is **not** established by the contract code or by available tests and requires empirical verification against a running GenLayer runtime |
-| 12 | Oversized proposal | `gl.vm.UserError("proposal exceeds maximum length")` |
-| 13 | Ambiguous requirement | `evidence_assessment="ambiguous"`, `decision="review"` |
-
-> **Note on Test Cases 9 and 11:** The outcomes above match `docs/manual_studio_test_plan.md`: Test Case 9 expects no stored evaluation result (and therefore no stored `review_required`) when `UserError` aborts `compute()`, and Test Case 11 is documented as an open observation of GenLayer runtime behavior that requires empirical verification. Both files were corrected to this state.
+Summary:
+- M01–M08: successful execution and expected observed decisions.
+- M09–M10: NOT VERIFIED; malformed or incomplete LLM output was not demonstrated.
+- M11: execution succeeded, but the intended validator-False behavior was not verified.
+- M12: PASS; the 50,001-character proposal was rejected with the expected UserError.
+- M13: execution and storage succeeded, but the assessment was `partial` rather than the expected `ambiguous`; this is an expectation mismatch, not a full pass.
 
 ### Test Status Summary
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Deterministic tests, executed (no runtime needed) | 6 | Passed (see notes: two are illustrative re-implementations, not direct contract tests) |
-| Deterministic tests, `genlayer` import | 4 | Errored at import (`ModuleNotFoundError: No module named 'genlayer'`) — decision-table logic not executed |
-| Manual Studio Test Plan | 13 | Pending GenLayer Studio environment |
+| Deterministic local tests | 6 | Passed; two are illustrative re-implementations, not direct contract tests |
+| Contract-import tests | 4 | Errored at import because `genlayer` is unavailable; decision-table logic not executed |
+| Manual Studio cases | 13 | Executed; M01–M08 and M12 passed, M09–M10 unverified, M11 target unverified, M13 expectation mismatch |
 
 **Test framework**: Python standard-library `unittest` (`tests/test_pev_direct.py`).
 

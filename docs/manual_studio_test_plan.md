@@ -138,10 +138,10 @@ against a running GenLayer Studio environment.
 
 ## Notes
 
-- These tests have NOT been executed.
-- They require a running GenLayer Studio environment with validator nodes.
-- Results should be recorded after execution and compared against expected values.
-- MAJORITY_AGREE, storage, and retrieval behavior should be verified during execution.
+- The original test plan above records expected outcomes.
+- Actual execution results are documented in the Execution Record Addendum below.
+- M09 and M10 remain unverified; M11's intended validator-False behavior remains unverified.
+- M13 executed successfully but did not produce the expected `ambiguous` assessment.
 ## Execution Record Addendum — PEV-M01 to PEV-M13
 
 The following records supplement the planned cases with observed Studio
