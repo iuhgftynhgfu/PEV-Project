@@ -1,14 +1,20 @@
 """
-Direct Mode tests for PEV contract deterministic logic.
+PEV contract deterministic-logic tests (Python standard-library unittest).
 
-These tests cover deterministic logic that does not require GenLayer runtime:
-- quote_exists computation
-- _compute_decision decision table logic
-- evaluation_complete field completeness check
+Coverage:
+- quote_exists computation (mirrors the contract's substring logic)
+- input length-limit comparison (mirrors input_within_limit)
+- _compute_decision decision-table logic (imports PEVContract; requires the
+  genlayer package, which is not verified as available in this environment)
+- evaluation_complete field-completeness check (illustrative re-implementation;
+  does not exercise the contract's actual evaluation_complete logic)
 
-NOTE: These tests have NOT been executed yet. They require the genlayer
-package and the PEVContract class to be importable, which is not verified
-in this environment.
+Execution status: not verified by any artifact in this repository — no
+execution log or CI record is committed. A session handoff record reports
+that the six runtime-independent tests were executed and passed; this file
+does not assert that result, because it cannot be re-verified from the
+repository. The two evaluation_complete tests are illustrative only and do
+not constitute validation of GenLayer contract behavior.
 """
 
 import unittest
@@ -83,10 +89,12 @@ class TestPEVDeterministicLogic(unittest.TestCase):
 
 
 class TestPEVWithMocks(unittest.TestCase):
-    """Tests requiring mocked gl.vm and gl.nondet.
+    """Illustrative field-completeness tests (no mocking; pure dict checks).
 
-    NOTE: These tests are illustrative only. They have NOT been executed
-    and do not constitute validation of GenLayer contract behavior.
+    NOTE: These tests re-implement a field-presence check and do not import
+    or exercise the contract's actual evaluation_complete logic. Their
+    execution is not verified by repository artifacts, and they do not
+    constitute validation of GenLayer contract behavior.
     """
 
     def test_evaluation_complete_from_fields(self):

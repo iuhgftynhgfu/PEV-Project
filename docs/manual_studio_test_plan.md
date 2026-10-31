@@ -92,7 +92,7 @@ against a running GenLayer Studio environment.
 | proposal | Any valid input |
 | candidate_quote | Any valid input |
 
-**Expected:** `gl.vm.UserError` raised, `review_required=True`
+**Expected:** `gl.vm.UserError` raised; `compute()` is aborted, so no evaluation result (and therefore no `review_required` value) is stored for that execution.
 
 ## Test Case 10: Missing Required Fields
 
@@ -112,7 +112,7 @@ against a running GenLayer Studio environment.
 | proposal | We implement AES-256 encryption at rest. |
 | candidate_quote | AES-256 encryption at rest |
 
-**Expected:** Consensus failure if validators disagree on `evidence_assessment`
+**Expected:** Observes GenLayer Runtime behavior when a validator verdict is `False`. The outcome is not established by the contract code or by available tests; it requires empirical verification against a running GenLayer runtime.
 
 ## Test Case 12: Oversized Proposal
 

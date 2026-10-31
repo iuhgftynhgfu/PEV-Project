@@ -8,27 +8,55 @@ PEV (Procurement Evidence Verifier) is a GenLayer Intelligent Contract prototype
 
 ## Problem Statement
 
-Procurement teams manually review vendor proposals to verify compliance with specification requirements. This process is time-consuming and prone to human inconsistency. PEV automates the evidence evaluation step, providing a structured, deterministic decision output based on LLM-assisted semantic evaluation and on-chain storage of results.
+Procurement teams manually review vendor proposals to verify compliance with specification requirements. This process is time-consuming and prone to human inconsistency. PEV automates the evidence evaluation step, providing a structured, deterministic decision output based on LLM-assisted semantic evaluation and storage of results in contract state.
 
 ## Why PEV Matters
 
 - **Deterministic decision logic**: The final decision (accept / reject / review) is computed deterministically inside the contract from the LLM-evaluated evidence fields, not by the LLM directly.
 - **Deterministic quote verification**: The contract checks whether a candidate quote exists verbatim in the proposal text, independent of LLM output.
-- **On-chain storage**: Evaluation results are stored in contract state as JSON-serialized records, keyed by proposal ID.
+- **Contract-state storage**: Evaluation results are stored in contract state as JSON-serialized records, keyed by proposal ID. (Whether this state resides on-chain depends on the deployment environment; this repository contains no deployment record that establishes on-chain storage.)
 - **No compliance claims**: The contract records evidence characteristics only; it does not certify real-world compliance, legal validity, or security.
 
 ## Architecture
 
-```
-PEV Contract
-├── compute() - Main entry point (write)
-│   ├── Input validation (proposal_id, requirement, proposal, candidate_quote)
-    ├── quote_exists: Deterministic substring check (computed outside LLM)
-    ├── leader_fn: LLM-based semantic evaluation via gl.nondet.exec_prompt
-    ├── validator_fn: Deterministic structural verification of leader output
-    ├── run_nondet_unsafe: Non-deterministic execution wrapper
-    └── State storage: JSON-serialized results in TreeMap[str, str]
-└── get_evaluation() - Read-only access (view)
+```mermaid
+flowchart TD
+    A["compute() entry @gl.public.write (96)"] --> B["Input checks: types + non-empty proposal_id/requirement; UserError (98-105)"]
+    B --> C["Deterministic, pre-LLM: quote_exists = candidate_quote in proposal (109-111)"]
+    C --> D["input_within_limit = len(proposal) <= 50000; UserError if over (113-115)"]
+    D --> E["gl.vm.run_nondet_unsafe(leader_fn, validator_fn) — both passed as callbacks (187)"]
+
+    E --> F1["leader_fn (117-160)"]
+    F1 --> F2["Prompt: requirement + proposal marked UNTRUSTED (120-131)"]
+    F2 --> F3["gl.nondet.exec_prompt(response_format='json') — the only LLM call (135)"]
+    F3 --> F4["Parse dict/JSON; UserError on malformed (136-144)"]
+    F4 --> F5["_validate_evidence_fields (153)"]
+    F5 --> F6["decision = _compute_decision(ea, sr, ef) — derived locally, not by LLM (154-158)"]
+    F6 --> F7["Attach deterministic quote_exists (159); return dict (160)"]
+
+    E --> G1["validator_fn(leader_result) (162-184) — no LLM call, no storage access"]
+    G1 --> G2["isinstance(leader_result, gl.vm.Return)? (166)"]
+    G2 --> G3["leader_data = leader_result.calldata (169)"]
+    G3 --> G4["_validate_result_shape: fields/types/enums/decision-table (173; def 44-67)"]
+    G4 --> G5["_check_consistency: cross-field rules (176; def 70-86)"]
+    G5 --> G6["quote_exists present + bool + equals compute() value (178-182)"]
+    G6 --> G7["return True/False only (184)"]
+
+    F7 --> H["run_result: plain dict received by compute() (187-188)"]
+    G7 --> H
+    H --> I["Post-call checks in compute(): dict type + required fields (188-195)"]
+    I --> J["quote_exists bool + equals local value (197-200)"]
+    J --> K["Second pass: _validate_result_shape + _check_consistency (205-210)"]
+    K --> L["Compute evaluation_complete (219-224), review_required (228-232)"]
+    L --> M["Assemble 9-field result dict (234-244)"]
+    M --> N["Store: self.evaluations[proposal_id] = json.dumps(result), TreeMap[str,str] (246)"]
+    N --> O["return result (247)"]
+
+    H -. "behavior if validator_fn returns False is NOT established in project files" .-> NOTE["Open question — see Limitations"]
+
+    P["get_evaluation(proposal_id) @gl.public.view — separate read path (250-257)"] --> Q["self.evaluations.get(proposal_id) (251)"]
+    Q --> R["None -> return None (252-253)"]
+    Q --> S["json.loads -> return dict (255); UserError on corruption (256-257)"]
 ```
 
 ### Contract State
@@ -42,13 +70,13 @@ PEV Contract
 | Method | Decorator | Parameters | Returns |
 |--------|-----------|------------|---------|
 | `compute` | `@gl.public.write` | `proposal_id`, `requirement`, `proposal`, `candidate_quote` | `dict` with evaluation result |
-| `get_evaluation` | `@gl.public.view` | `proposal_id` | `dict` or `None` |
+| `get_evaluation` | `@gl.public.view` | `proposal_id` | `dict` (stored result), or `None` if no result is stored; raises `gl.vm.UserError` if the stored JSON is corrupted |
 
 ## How It Works
 
 ### 1. Input Validation
 
-All inputs (`proposal_id`, `requirement`, `proposal`, `candidate_quote`) are validated as strings where required. `proposal_id` and `requirement` must be non-empty. `candidate_quote` may be empty.
+All inputs (`proposal_id`, `requirement`, `proposal`, `candidate_quote`) are validated as strings where required. `proposal_id` and `requirement` must be non-empty. `candidate_quote` may be empty. `proposal` must be at most 50,000 characters (`MAX_PROPOSAL_LENGTH`); `compute()` raises `gl.vm.UserError("proposal exceeds maximum length")` when it exceeds the limit.
 
 ### 2. Deterministic Quote Check (`quote_exists`)
 
@@ -103,7 +131,7 @@ The contract uses a deterministic decision table computed inside the contract (n
 | insufficient | any | any | **review** |
 | ambiguous | any | any | **review** |
 
-The `decision` field is computed locally by the contract, not returned by the LLM. This prevents LLM output variance from affecting the final verdict.
+The `decision` field is computed locally by the contract, not returned by the LLM. This prevents LLM output variance from affecting the `decision` field itself; which table row applies still depends on the LLM-evaluated fields, so variance in those fields can change the outcome.
 
 ## Evidence Assessment
 
@@ -114,6 +142,23 @@ The `decision` field is computed locally by the contract, not returned by the LL
 | `contradicted` | Evidence directly contradicts the requirement |
 | `insufficient` | Evidence relevant but doesn't establish the requirement |
 | `ambiguous` | Requirement or evidence too ambiguous to judge |
+
+### Semantic Relevance Values
+
+`semantic_relevance` is one of three values (contract: `ALLOWED_RELEVANCE`):
+
+| Value | Effect in the decision table |
+|-------|------------------------------|
+| `relevant` | Required, together with `supported` and `evidence_found=true`, for `accept` |
+| `irrelevant` | Always results in `reject`, regardless of the other fields |
+| `uncertain` | Does not enable `accept` and does not by itself force `reject`; with a non-`contradicted` assessment it falls through to `review` |
+
+### Result Flags: `evaluation_complete` and `review_required`
+
+Both are computed deterministically inside `compute()` from the validated result fields:
+
+- **`evaluation_complete`** is `True` only when all four result fields are within their allowed domains: `evidence_assessment` is an allowed status, `semantic_relevance` is an allowed value, `evidence_found` is a boolean, and `decision` is an allowed decision value. It is a field-domain check; it does not verify factual correctness of the evaluation.
+- **`review_required`** is `True` when the evaluation is incomplete, or when `decision` is `review`, or when `evidence_assessment` is `insufficient` or `ambiguous`. A clear `reject` (for example, contradicted evidence) does not by itself set `review_required`.
 
 ## Equivalence Principle
 
@@ -127,7 +172,7 @@ What this section does not claim: that all validator outputs are identical acros
 
 ## Testing Results
 
-### Deterministic Tests (Execution Status Unresolved — See Note Below)
+### Deterministic Tests (Execution Status Not Verified by Repository Evidence)
 
 `tests/test_pev_direct.py` contains six tests that do not require the GenLayer runtime:
 
@@ -140,16 +185,16 @@ What this section does not claim: that all validator outputs are identical acros
 | 5 | `test_evaluation_complete_from_fields` | Illustrative re-implementation of a field-presence check (see note 3) |
 | 6 | `test_evaluation_complete_missing_field` | Illustrative re-implementation of a field-presence check (see note 3) |
 
-**Execution status — conflicting evidence, unresolved:**
+**Execution status — not verified by repository evidence:**
 
-1. A prior session record reports that these six deterministic tests were executed and passed.
-2. The committed test file's own docstring states: "These tests have NOT been executed yet." (`tests/test_pev_direct.py`, lines 9–12.)
-3. The repository contains no execution log, CI artifact, or other record that resolves this conflict.
+1. No execution log, CI artifact, or other execution record is committed to this repository, so in-repo execution cannot be verified from repository contents alone.
+2. A session handoff record reports that these six deterministic tests were executed and passed; that record is external to the repository and cannot be re-verified from it. This README therefore makes no PASS claims.
+3. The test file's docstring carries the same status description (see `tests/test_pev_direct.py`).
 4. Tests 5 and 6 re-implement the check as a field-presence test (`is not None`) and do **not** import or exercise the contract's actual `evaluation_complete` logic, which checks allowed values (e.g. `evidence_assessment in ALLOWED_STATUSES`), not mere presence. Their docstring says they are "illustrative only" and "do not constitute validation of GenLayer contract behavior."
 
 This section therefore does not present these tests as verified passing repository evidence.
 
-### Tests Not Executed (Require GenLayer Runtime)
+### Tests Not Executed (Require the `genlayer` Package for Import)
 
 4 deterministic logic tests were identified but **not executed** because they require importing `PEVContract` from `contracts.pev_contract.py`, which depends on the `genlayer` package that is not available in this environment:
 
@@ -178,13 +223,13 @@ The following 13 test cases are documented in `docs/manual_studio_test_plan.md` 
 | 12 | Oversized proposal | `gl.vm.UserError("proposal exceeds maximum length")` |
 | 13 | Ambiguous requirement | `evidence_assessment="ambiguous"`, `decision="review"` |
 
-> **Note on Test Case 9:** The outcome above (no stored `review_required` when `UserError` aborts `compute()`) is the code-grounded behavior. It currently does **not** match `docs/manual_studio_test_plan.md` (Test Case 9, which expects `review_required=True`). The manual plan needs a separate review to reconcile this discrepancy; that file is intentionally not modified here.
+> **Note on Test Cases 9 and 11:** The outcomes above match `docs/manual_studio_test_plan.md`: Test Case 9 expects no stored evaluation result (and therefore no stored `review_required`) when `UserError` aborts `compute()`, and Test Case 11 is documented as an open observation of GenLayer runtime behavior that requires empirical verification. Both files were corrected to this state.
 
 ### Test Status Summary
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Deterministic tests (no runtime needed) | 6 | Execution status unresolved — see conflict note above |
+| Deterministic tests (no runtime needed) | 6 | Not verified by repository evidence — see status note above |
 | Tests not executed (require GenLayer runtime) | 4 | Pending `genlayer` package availability |
 | Manual Studio Test Plan | 13 | Pending GenLayer Studio environment |
 
