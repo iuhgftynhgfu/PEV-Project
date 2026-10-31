@@ -70,9 +70,11 @@ against a running GenLayer Studio environment.
 |-------|-------|
 | requirement | System shall use AES-256 |
 | proposal | The quote is "We use AES-256". |
-| candidate_quote | We use AES-256 |
+| candidate_quote | We use AES-256 encryption at rest |
 
-**Expected:** `quote_exists=False` (not in proposal text)
+**Expected (deterministic, code-grounded):** `quote_exists=false` — `candidate_quote` ("We use AES-256 encryption at rest") is not a literal substring of the proposal text, so the deterministic check in `compute()` (contract lines 109–111) must return `false` even though the proposal contains the shorter quoted phrase "We use AES-256". Also `input_within_limit=true`.
+
+**Success criterion:** `get_evaluation` returns `quote_exists=false` for this proposal_id; any LLM-produced field that is inconsistent with the stored record would be a failure, but the deterministic `quote_exists=false` is the binding check for this case.
 
 ## Test Case 8: Conflicting Evidence
 
