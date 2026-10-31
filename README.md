@@ -172,36 +172,37 @@ What this section does not claim: that all validator outputs are identical acros
 
 ## Testing Results
 
-### Deterministic Tests (Execution Status Not Verified by Repository Evidence)
+### Deterministic Tests — Executed (Python standard-library `unittest`)
 
-`tests/test_pev_direct.py` contains six tests that do not require the GenLayer runtime:
+Executed with `python -m unittest -v tests.test_pev_direct` (from the repository root). **Total: 10 tests — 6 passed, 0 failed, 4 errors, 0 skipped.**
 
-| # | Test | What it tests |
-|---|------|---------------|
-| 1 | `test_quote_exists_true` | Substring logic mirroring the `quote_exists` computation in `compute()` |
-| 2 | `test_quote_exists_false` | Substring logic mirroring the `quote_exists` computation in `compute()` |
-| 3 | `test_empty_quote` | Empty-quote case mirroring the `quote_exists` computation |
-| 4 | `test_input_within_limit` | Length-limit comparison mirroring `input_within_limit` |
-| 5 | `test_evaluation_complete_from_fields` | Illustrative re-implementation of a field-presence check (see note 3) |
-| 6 | `test_evaluation_complete_missing_field` | Illustrative re-implementation of a field-presence check (see note 3) |
+The 6 passing tests do not require the GenLayer runtime and do not import the contract:
 
-**Execution status — not verified by repository evidence:**
+| # | Test | What it tests | Result |
+|---|------|---------------|--------|
+| 1 | `test_quote_exists_true` | Substring logic mirroring the `quote_exists` computation in `compute()` | PASS |
+| 2 | `test_quote_exists_false` | Substring logic mirroring the `quote_exists` computation in `compute()` | PASS |
+| 3 | `test_empty_quote` | Empty-quote case mirroring the `quote_exists` computation | PASS |
+| 4 | `test_input_within_limit` | Length-limit comparison mirroring `input_within_limit` | PASS |
+| 5 | `test_evaluation_complete_from_fields` | Illustrative re-implementation of a field-presence check (see note 3) | PASS |
+| 6 | `test_evaluation_complete_missing_field` | Illustrative re-implementation of a field-presence check (see note 3) | PASS |
 
-1. No execution log, CI artifact, or other execution record is committed to this repository, so in-repo execution cannot be verified from repository contents alone.
-2. A session handoff record reports that these six deterministic tests were executed and passed; that record is external to the repository and cannot be re-verified from it. This README therefore makes no PASS claims.
-3. The test file's docstring carries the same status description (see `tests/test_pev_direct.py`).
-4. Tests 5 and 6 re-implement the check as a field-presence test (`is not None`) and do **not** import or exercise the contract's actual `evaluation_complete` logic, which checks allowed values (e.g. `evidence_assessment in ALLOWED_STATUSES`), not mere presence. Their docstring says they are "illustrative only" and "do not constitute validation of GenLayer contract behavior."
+**Execution notes:**
 
-This section therefore does not present these tests as verified passing repository evidence.
+1. Command: `python -m unittest -v tests.test_pev_direct` (single local run in this environment; no CI or automated execution artifact is committed to the repository).
+2. The six passing tests are self-contained deterministic-logic tests.
+3. Tests 5 and 6 are **illustrative re-implementations**, not direct contract tests: they re-implement the check as a field-presence test (`is not None`) and do **not** import or exercise the contract's actual `evaluation_complete` logic, which checks allowed values (e.g. `evidence_assessment in ALLOWED_STATUSES`), not mere presence.
 
-### Tests Not Executed (Require the `genlayer` Package for Import)
+### Tests Errored at Import (require the `genlayer` package) — 4 errors, not logical failures
 
-4 deterministic logic tests were identified but **not executed** because they require importing `PEVContract` from `contracts.pev_contract.py`, which depends on the `genlayer` package that is not available in this environment:
+The following 4 tests **errored at import** and did not reach their decision-table logic:
 
 - `test_compute_decision_accept`
 - `test_compute_decision_reject_contradicted`
 - `test_compute_decision_reject_irrelevant`
 - `test_compute_decision_review`
+
+Each fails at `from contracts.pev_contract import PEVContract`, which triggers `from genlayer import *` (contract line 4) and raises `ModuleNotFoundError: No module named 'genlayer'`. This is a **missing-dependency error at import time** — it is **neither a logical failure nor a pass** of the `_compute_decision` decision table. The decision-table logic itself was not executed in this environment.
 
 ### Manual Studio Test Plan (Not Executed)
 
@@ -229,8 +230,8 @@ The following 13 test cases are documented in `docs/manual_studio_test_plan.md` 
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Deterministic tests (no runtime needed) | 6 | Not verified by repository evidence — see status note above |
-| Tests not executed (require GenLayer runtime) | 4 | Pending `genlayer` package availability |
+| Deterministic tests, executed (no runtime needed) | 6 | Passed (see notes: two are illustrative re-implementations, not direct contract tests) |
+| Deterministic tests, `genlayer` import | 4 | Errored at import (`ModuleNotFoundError: No module named 'genlayer'`) — decision-table logic not executed |
 | Manual Studio Test Plan | 13 | Pending GenLayer Studio environment |
 
 **Test framework**: Python standard-library `unittest` (`tests/test_pev_direct.py`).
