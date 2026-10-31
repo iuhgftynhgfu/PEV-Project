@@ -25,7 +25,7 @@ PEV Contract
 │   ├── Input validation (proposal_id, requirement, proposal, candidate_quote)
     ├── quote_exists: Deterministic substring check (computed outside LLM)
     ├── leader_fn: LLM-based semantic evaluation via gl.nondet.exec_prompt
-    ├── validator_fn: Independent structural validation of leader output
+    ├── validator_fn: Deterministic structural verification of leader output
     ├── run_nondet_unsafe: Non-deterministic execution wrapper
     └── State storage: JSON-serialized results in TreeMap[str, str]
 └── get_evaluation() - Read-only access (view)
@@ -65,18 +65,29 @@ The leader executes `gl.nondet.exec_prompt()` with a structured prompt that:
 - Requests JSON output with: `evidence_assessment`, `semantic_relevance`, `evidence_found`, `explanation`
 - Explicitly states: "Do not return a decision field; the contract derives it deterministically"
 
-### 4. Validator Function (Independent Verification)
+### 4. Validator Function (Deterministic Structural Verification)
 
-The validator:
-1. Receives `leader_result` as `gl.vm.Return` and extracts `.calldata`
-2. Validates the leader's output structure and values
-3. Checks internal consistency (decision matches decision table)
-4. Verifies `quote_exists` against the deterministic value computed in `compute()`
-5. Does **not** re-call `leader_fn()` (avoids non-deterministic LLM variance)
+The validator receives the leader's result as a `gl.vm.Return` object and reads the payload from its `.calldata` attribute. Its explicit checks:
 
-### 5. Consensus and Finalization
+1. The argument is a `gl.vm.Return` (otherwise it returns `False`).
+2. `.calldata` is readable (failure returns `False`).
+3. Result shape: the payload is a dict with `evidence_assessment`, `semantic_relevance`, `evidence_found`, and `decision`; field types and allowed enum values are checked, and `explanation` is checked to be a string within the length limit (type/length check only, not a semantic check).
+4. Decision-table consistency: `decision` must equal the value the deterministic decision table computes from the other fields.
+5. Cross-field consistency rules (e.g. `supported` requires `evidence_found = true` and cannot combine with `irrelevant`).
+6. `quote_exists` must be present, must be a boolean, and must equal the deterministic value computed in `compute()` before the nondeterministic execution.
 
-`gl.vm.run_nondet_unsafe(leader_fn, validator_fn)` executes the leader and validator. The result is validated, stored as JSON in `TreeMap[str, str]`, and returned.
+The validator returns a single boolean verdict: `True` only if all checks pass; each explicit failure branch returns `False` without raising. It does not issue a second LLM call and does not read or write contract storage. It validates structure and internal consistency; it does not independently re-derive or fact-check the semantic assessment.
+
+### 5. Finalization in `compute()`
+
+`compute()` calls `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)`, passing both functions as callbacks to the nondeterministic execution wrapper. The leader's result reaches the two sides in different forms:
+
+- Inside `validator_fn` it arrives wrapped as a `gl.vm.Return` and is read via `.calldata`.
+- `compute()` receives `run_result` as a plain `dict`.
+
+`compute()` then re-validates the result deterministically before assembling anything to store: it checks that `run_result` is a dict containing the required fields, that `quote_exists` is a boolean equal to the value `compute()` itself computed, and re-runs the shape and consistency checks. Only then are `evaluation_complete` and `review_required` computed, the final result dict assembled, the result stored as JSON in `TreeMap[str, str]`, and the dict returned.
+
+This section documents the contract code only. It does not state how the GenLayer runtime reacts when `validator_fn` returns `False`; that behavior is not established by this repository.
 
 ## Decision Logic
 
@@ -106,28 +117,37 @@ The `decision` field is computed locally by the contract, not returned by the LL
 
 ## Equivalence Principle
 
-GenLayer's equivalence principle requires that all validators produce identical outputs for the same inputs. PEV is designed so that:
+GenLayer's equivalence principle requires nondeterministic code paths to be checkable by validators; this repository's code is written to keep the validator itself deterministic, so that a validator re-run on the same inputs produces the same verdict. What the code establishes:
 
-1. **Deterministic fields**: `quote_exists`, `input_within_limit`, `evaluation_complete`, `review_required` are computed deterministically inside `compute()`.
-2. **LLM outputs are not compared textually**: `evidence_assessment`, `semantic_relevance`, `evidence_found`, `decision`, `explanation` are evaluated by the LLM but validated for structure and internal consistency, not for exact textual match across validators.
-3. **Decision derived locally**: The `decision` field is computed from the other fields using a deterministic table.
+1. **Deterministic fields**: `quote_exists`, `input_within_limit`, `evaluation_complete`, `review_required` are computed deterministically inside `compute()` from the inputs, not from LLM output.
+2. **The LLM supplies evidence fields only**: `evidence_assessment`, `semantic_relevance`, `evidence_found`, and `explanation` are produced by the LLM. The validator checks their structure, allowed values, and internal consistency against the decision table; `explanation` is type/length checked only. No code in this contract compares LLM outputs across runs or across validators, and the contract does not claim to prove equivalence at the runtime level.
+3. **Decision derived locally**: The `decision` field is never returned by the LLM; it is computed by the contract from the evidence fields using a deterministic table.
+
+What this section does not claim: that all validator outputs are identical across validators (the contract defines a single validator and no code compares validator outputs), or that the runtime provides specific consensus guarantees.
 
 ## Testing Results
 
-### Executed Tests (Phase 9 — Phase 9 Isolated Deterministic Tests)
+### Deterministic Tests (Execution Status Unresolved — See Note Below)
 
-6 independent deterministic tests were successfully executed without the GenLayer runtime:
+`tests/test_pev_direct.py` contains six tests that do not require the GenLayer runtime:
 
-| # | Test | Result |
-|---|------|--------|
-| 1 | `test_quote_exists_true` | PASS |
-| 2 | `test_quote_exists_false` | PASS |
-| 3 | `test_empty_quote` | PASS |
-| 4 | `test_input_within_limit` | PASS |
-| 5 | `test_evaluation_complete_from_fields` | PASS |
-| 6 | `test_evaluation_complete_missing_field` | PASS |
+| # | Test | What it tests |
+|---|------|---------------|
+| 1 | `test_quote_exists_true` | Substring logic mirroring the `quote_exists` computation in `compute()` |
+| 2 | `test_quote_exists_false` | Substring logic mirroring the `quote_exists` computation in `compute()` |
+| 3 | `test_empty_quote` | Empty-quote case mirroring the `quote_exists` computation |
+| 4 | `test_input_within_limit` | Length-limit comparison mirroring `input_within_limit` |
+| 5 | `test_evaluation_complete_from_fields` | Illustrative re-implementation of a field-presence check (see note 3) |
+| 6 | `test_evaluation_complete_missing_field` | Illustrative re-implementation of a field-presence check (see note 3) |
 
-**Total**: 6 executed | **6 passed** | **0 failed**
+**Execution status — conflicting evidence, unresolved:**
+
+1. A prior session record reports that these six deterministic tests were executed and passed.
+2. The committed test file's own docstring states: "These tests have NOT been executed yet." (`tests/test_pev_direct.py`, lines 9–12.)
+3. The repository contains no execution log, CI artifact, or other record that resolves this conflict.
+4. Tests 5 and 6 re-implement the check as a field-presence test (`is not None`) and do **not** import or exercise the contract's actual `evaluation_complete` logic, which checks allowed values (e.g. `evidence_assessment in ALLOWED_STATUSES`), not mere presence. Their docstring says they are "illustrative only" and "do not constitute validation of GenLayer contract behavior."
+
+This section therefore does not present these tests as verified passing repository evidence.
 
 ### Tests Not Executed (Require GenLayer Runtime)
 
@@ -152,21 +172,23 @@ The following 13 test cases are documented in `docs/manual_studio_test_plan.md` 
 | 6 | Prompt injection — false positive | `quote_exists=True`, `evidence_assessment` based on LLM eval |
 | 7 | Prompt injection — fabricated quote | `quote_exists=False` (not in proposal text) |
 | 8 | Conflicting evidence | `quote_exists=True`, `evidence_assessment` based on LLM eval |
-| 9 | Malformed LLM response | `gl.vm.UserError` raised |
+| 9 | Malformed LLM response | `gl.vm.UserError` raised; `compute()` aborts, so no evaluation result (and thus no `review_required` value) is stored for that execution |
 | 10 | Missing required fields | `gl.vm.UserError` raised |
-| 11 | Validator disagreement | Consensus failure if validators disagree |
+| 11 | Validator disagreement | Intended to observe runtime behavior when a validator verdict is `False`; this is **not** established by the contract code or by available tests and requires empirical verification against a running GenLayer runtime |
 | 12 | Oversized proposal | `gl.vm.UserError("proposal exceeds maximum length")` |
 | 13 | Ambiguous requirement | `evidence_assessment="ambiguous"`, `decision="review"` |
+
+> **Note on Test Case 9:** The outcome above (no stored `review_required` when `UserError` aborts `compute()`) is the code-grounded behavior. It currently does **not** match `docs/manual_studio_test_plan.md` (Test Case 9, which expects `review_required=True`). The manual plan needs a separate review to reconcile this discrepancy; that file is intentionally not modified here.
 
 ### Test Status Summary
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Executed (Phase 9) | 6 | All passed |
-| Not executed (require GenLayer runtime) | 4 | Pending `genlayer` package availability |
+| Deterministic tests (no runtime needed) | 6 | Execution status unresolved — see conflict note above |
+| Tests not executed (require GenLayer runtime) | 4 | Pending `genlayer` package availability |
 | Manual Studio Test Plan | 13 | Pending GenLayer Studio environment |
 
-**Test framework**: `genlayer-test` (Direct Mode) — not verified as available in this environment
+**Test framework**: Python standard-library `unittest` (`tests/test_pev_direct.py`).
 
 ## Installation and Usage
 
@@ -184,7 +206,9 @@ Dependencies are not pinned in `requirements.txt` because the GenLayer SDK (`gen
 
 Deployment commands are not documented here because the official GenLayer deployment procedure has not been verified in this environment. Refer to official GenLayer documentation.
 
-### Contract Invocation
+### Contract Invocation (API-shape reference only)
+
+The example below shows the call shape. It is **not** a verified local invocation: `compute()` calls `gl.nondet.exec_prompt`, which requires a GenLayer runtime, so plain local Python execution of this example is not verified in this environment.
 
 ```python
 from contracts.pev_contract import PEVContract
@@ -199,7 +223,9 @@ result = contract.compute(
 print(result)
 ```
 
-### Retrieving an Evaluation
+### Retrieving an Evaluation (API-shape reference only)
+
+Same caveat: `get_evaluation` reads contract state, which is maintained by the GenLayer runtime.
 
 ```python
 result = contract.get_evaluation("PROP-001")
