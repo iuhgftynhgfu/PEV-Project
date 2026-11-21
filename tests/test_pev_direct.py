@@ -4,20 +4,34 @@ PEV contract deterministic-logic tests (Python standard-library unittest).
 Coverage:
 - quote_exists computation (mirrors the contract's substring logic)
 - input length-limit comparison (mirrors input_within_limit)
-- _compute_decision decision-table logic (imports PEVContract; requires the
-  genlayer package, which is not verified as available in this environment)
+- _compute_decision decision-table logic (imports the module-level helper
+  from contracts.pev_contract via the genlayer stub in
+  tests/genlayer_stub.py — V5 fix: V4 called contract._compute_decision,
+  but _compute_decision is a module-level function, not a method)
 - evaluation_complete field-completeness check (illustrative re-implementation;
   does not exercise the contract's actual evaluation_complete logic)
 
-Execution status: not verified by any artifact in this repository — no
-execution log or CI record is committed. A session handoff record reports
-that the six runtime-independent tests were executed and passed; this file
-does not assert that result, because it cannot be re-verified from the
-repository. The two evaluation_complete tests are illustrative only and do
-not constitute validation of GenLayer contract behavior.
+Execution status (V5, 2026-11-21): all 10 tests pass with the stub installed
+(see README "Testing Results"). Run from the repository root:
+python -m unittest -v tests.test_pev_direct
 """
 
+import os
+import sys
 import unittest
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+_TESTS = os.path.dirname(os.path.abspath(__file__))
+if _TESTS not in sys.path:
+    sys.path.insert(0, _TESTS)
+
+import genlayer_stub
+
+genlayer_stub.install()
+
+from contracts.pev_contract import _compute_decision
 
 
 class TestPEVDeterministicLogic(unittest.TestCase):
@@ -60,32 +74,24 @@ class TestPEVDeterministicLogic(unittest.TestCase):
 
     def test_compute_decision_accept(self):
         """Decision table: supported + relevant + true = accept."""
-        from contracts.pev_contract import PEVContract
-        contract = PEVContract()
-        result = contract._compute_decision("supported", "relevant", True)
+        result = _compute_decision("supported", "relevant", True)
         self.assertEqual(result, "accept")
 
     def test_compute_decision_reject_contradicted(self):
         """Decision table: contradicted = reject."""
-        from contracts.pev_contract import PEVContract
-        contract = PEVContract()
-        result = contract._compute_decision("contradicted", "relevant", True)
+        result = _compute_decision("contradicted", "relevant", True)
         self.assertEqual(result, "reject")
 
     def test_compute_decision_reject_irrelevant(self):
         """Decision table: irrelevant = reject."""
-        from contracts.pev_contract import PEVContract
-        contract = PEVContract()
-        result = contract._compute_decision("supported", "irrelevant", True)
+        result = _compute_decision("supported", "irrelevant", True)
         self.assertEqual(result, "reject")
 
     def test_compute_decision_review(self):
         """Decision table: partial/insufficient/ambiguous = review."""
-        from contracts.pev_contract import PEVContract
-        contract = PEVContract()
-        self.assertEqual(contract._compute_decision("partial", "relevant", True), "review")
-        self.assertEqual(contract._compute_decision("insufficient", "relevant", True), "review")
-        self.assertEqual(contract._compute_decision("ambiguous", "relevant", True), "review")
+        self.assertEqual(_compute_decision("partial", "relevant", True), "review")
+        self.assertEqual(_compute_decision("insufficient", "relevant", True), "review")
+        self.assertEqual(_compute_decision("ambiguous", "relevant", True), "review")
 
 
 class TestPEVWithMocks(unittest.TestCase):
