@@ -2,6 +2,8 @@
 
 An Intelligent Contract for GenLayer that evaluates whether a vendor proposal contains textual evidence supporting procurement specification requirements.
 
+> **Version: V5 (2026-11-21).** V5 answers the Oct 31, 2026 rejection of the V4 submission: V4's validator only checked the leader result's structure, so opposite assessments could both pass. In V5 every validator independently re-evaluates the proposal evidence with its own LLM call and consensus is over the bound (assessment, decision) pair. See [FIX-SUMMARY.md](FIX-SUMMARY.md) for what changed and how to deploy and resubmit. The V4 Studio results below are kept as a historical record.
+
 ## Project Overview
 
 PEV (Procurement Evidence Verifier) is a GenLayer Intelligent Contract prototype designed to evaluate procurement proposals against specification requirements. The contract determines whether submitted textual evidence in a proposal supports, partially supports, contradicts, or fails to establish each requirement.
@@ -21,42 +23,45 @@ Procurement teams manually review vendor proposals to verify compliance with spe
 
 ```mermaid
 flowchart TD
-    A["compute() entry @gl.public.write (96)"] --> B["Input checks: types + non-empty proposal_id/requirement; UserError (98-105)"]
-    B --> C["Deterministic, pre-LLM: quote_exists = candidate_quote in proposal (109-111)"]
-    C --> D["input_within_limit = len(proposal) <= 50000; UserError if over (113-115)"]
-    D --> E["gl.vm.run_nondet_unsafe(leader_fn, validator_fn) — both passed as callbacks (187)"]
+    A["compute() entry @gl.public.write (240)"] --> B["Input checks: types + non-empty proposal_id/requirement; UserError (242-249)"]
+    B --> C["Deterministic, pre-LLM: quote_exists = candidate_quote in proposal (253-256)"]
+    C --> D["input_within_limit = len(proposal) <= 50000; UserError if over (257-259)"]
+    D --> E["gl.vm.run_nondet_unsafe(leader_fn, validator_fn) — both passed as callbacks (281)"]
 
-    E --> F1["leader_fn (117-160)"]
-    F1 --> F2["Prompt: requirement + proposal marked UNTRUSTED (120-131)"]
-    F2 --> F3["gl.nondet.exec_prompt(response_format='json') — the only LLM call (135)"]
-    F3 --> F4["Parse dict/JSON; UserError on malformed (136-144)"]
-    F4 --> F5["_validate_evidence_fields (153)"]
-    F5 --> F6["decision = _compute_decision(ea, sr, ef) — derived locally, not by LLM (154-158)"]
-    F6 --> F7["Attach deterministic quote_exists (159); return dict (160)"]
+    E --> F1["leader_fn (261-273)"]
+    F1 --> F2["Prompt: _build_assessment_prompt — SAME prompt the validator uses (262; def 105)"]
+    F2 --> F3["gl.nondet.exec_prompt(response_format='json') — leader's LLM call (263)"]
+    F3 --> F4["_parse_assessment: parse dict/JSON + validate fields (266; def 130)"]
+    F4 --> F5["decision = _compute_decision(ea, sr, ef) — derived locally, not by LLM (267-271)"]
+    F5 --> F6["Attach deterministic quote_exists (272); return dict (273)"]
 
-    E --> G1["validator_fn(leader_result) (162-184) — no LLM call, no storage access"]
-    G1 --> G2["isinstance(leader_result, gl.vm.Return)? (166)"]
-    G2 --> G3["leader_data = leader_result.calldata (169)"]
-    G3 --> G4["_validate_result_shape: fields/types/enums/decision-table (173; def 44-67)"]
-    G4 --> G5["_check_consistency: cross-field rules (176; def 70-86)"]
-    G5 --> G6["quote_exists present + bool + equals compute() value (178-182)"]
-    G6 --> G7["return True/False only (184)"]
+    E --> G1["validator_fn closure (275-278) -> _validator_fn (173-230)"]
+    G1 --> G2["isinstance(leader_result, gl.vm.Return)? (186)"]
+    G2 --> G3["leader_data = leader_result.calldata (189)"]
+    G3 --> G4["_validate_result_shape: fields/types/enums/decision-table (195; def 60)"]
+    G4 --> G5["_check_consistency: cross-field rules (198; def 86)"]
+    G5 --> G6["quote_exists present + bool + equals compute() value (201-208)"]
+    G6 --> G7["OWN gl.nondet.exec_prompt with the SAME shared prompt (214-217)"]
+    G7 --> G8["_parse_assessment of own output; malformed -> False (218-220)"]
+    G8 --> G9["Own decision via same table; must equal leader's decision (221-227)"]
+    G9 --> G10["Own evidence_assessment compatible with leader's: identical or both review-class (228-230)"]
+    G10 --> G11["return True/False only"]
 
-    F7 --> H["run_result: plain dict received by compute() (187-188)"]
-    G7 --> H
-    H --> I["Post-call checks in compute(): dict type + required fields (188-195)"]
-    I --> J["quote_exists bool + equals local value (197-200)"]
-    J --> K["Second pass: _validate_result_shape + _check_consistency (205-210)"]
-    K --> L["Compute evaluation_complete (219-224), review_required (228-232)"]
-    L --> M["Assemble 9-field result dict (234-244)"]
-    M --> N["Store: self.evaluations[proposal_id] = json.dumps(result), TreeMap[str,str] (246)"]
-    N --> O["return result (247)"]
+    F6 --> H["run_result: plain dict received by compute() (281-282)"]
+    G11 --> H
+    H --> I["Post-call checks in compute(): dict type + required fields (282-289)"]
+    I --> J["quote_exists bool + equals local value (291-294)"]
+    J --> K["Second pass: _validate_result_shape + _check_consistency (300-304)"]
+    K --> L["Compute evaluation_complete (313-318), review_required (322-326)"]
+    L --> M["Assemble 9-field result dict (328-338)"]
+    M --> N["Store: self.evaluations[proposal_id] = json.dumps(result), TreeMap[str,str] (340)"]
+    N --> O["return result (341)"]
 
-    H -. "behavior if validator_fn returns False is NOT established in project files" .-> NOTE["Open question — see Limitations"]
+    H -. "validator False -> leader rotation / retry per GenLayer docs; if no consensus, transaction undetermined, no state modified (not yet verified live)" .-> NOTE["See FIX-SUMMARY.md"]
 
-    P["get_evaluation(proposal_id) @gl.public.view — separate read path (250-257)"] --> Q["self.evaluations.get(proposal_id) (251)"]
-    Q --> R["None -> return None (252-253)"]
-    Q --> S["json.loads -> return dict (255); UserError on corruption (256-257)"]
+    P["get_evaluation(proposal_id) @gl.public.view — separate read path (344-351)"] --> Q["self.evaluations.get(proposal_id) (345)"]
+    Q --> R["None -> return None (346-347)"]
+    Q --> S["json.loads -> return dict (349); UserError on corruption (350-351)"]
 ```
 
 ### Contract State
@@ -87,15 +92,19 @@ The contract checks whether `candidate_quote` appears as a literal substring in 
 
 ### 3. Leader Function (Semantic Evaluation)
 
-The leader executes `gl.nondet.exec_prompt()` with a structured prompt that:
+The leader executes `gl.nondet.exec_prompt()` with a structured prompt built by the shared helper `_build_assessment_prompt()` (contract lines 105–127) — the **same** prompt the validator uses, byte-for-byte, so the validator re-runs the same task. The prompt:
 - Presents the requirement and proposal as untrusted data
 - Explicitly instructs the LLM to ignore any instructions embedded in the proposal
 - Requests JSON output with: `evidence_assessment`, `semantic_relevance`, `evidence_found`, `explanation`
 - Explicitly states: "Do not return a decision field; the contract derives it deterministically"
 
-### 4. Validator Function (Deterministic Structural Verification)
+The leader's output is parsed and validated by the shared helper `_parse_assessment()` (contract lines 130–153), which the validator also uses for its own output, so both sides apply identical parsing and validation.
 
-The validator receives the leader's result as a `gl.vm.Return` object and reads the payload from its `.calldata` attribute. Its explicit checks:
+### 4. Validator Function (Independent Re-Evaluation — V5)
+
+The validator receives the leader's result as a `gl.vm.Return` object and reads the payload from its `.calldata` attribute. The logic lives in the module-level `_validator_fn()` (contract lines 173–230); `compute()` passes a thin closure over it so the validator is directly unit-testable (see `tests/test_pev_v5_validator.py`). It runs in two stages:
+
+**Stage 1 — deterministic checks (unchanged from V4):**
 
 1. The argument is a `gl.vm.Return` (otherwise it returns `False`).
 2. `.calldata` is readable (failure returns `False`).
@@ -104,7 +113,15 @@ The validator receives the leader's result as a `gl.vm.Return` object and reads 
 5. Cross-field consistency rules (e.g. `supported` requires `evidence_found = true` and cannot combine with `irrelevant`).
 6. `quote_exists` must be present, must be a boolean, and must equal the deterministic value computed in `compute()` before the nondeterministic execution.
 
-The validator returns a single boolean verdict: `True` only if all checks pass; each explicit failure branch returns `False` without raising. It does not issue a second LLM call and does not read or write contract storage. It validates structure and internal consistency; it does not independently re-derive or fact-check the semantic assessment.
+**Stage 2 — independent semantic re-evaluation (new in V5):**
+
+7. The validator issues its **own** `gl.nondet.exec_prompt()` call with the shared `_build_assessment_prompt()` — the same task the leader ran — and parses its own output with the shared `_parse_assessment()`. If its own LLM call fails, returns malformed JSON, or is missing/invalid fields, it returns `False` (disagree rather than agree on broken output).
+8. It derives its **own** decision from its own assessment via the same deterministic table, and accepts the leader's result only if its own decision **equals** the leader's decision.
+9. It accepts only if its own `evidence_assessment` is **compatible** with the leader's: identical, or both in the review class (`partial` / `insufficient` / `ambiguous`). The `explanation` free-text field is deliberately not compared (two LLMs word reasoning differently).
+
+The validator returns a single boolean verdict: `True` only if all checks pass; each explicit failure branch returns `False` without raising. It does not read or write contract storage.
+
+**Why this answers the rejection:** V4's validator passed any structurally valid result, so a leader returning `supported → accept` and a leader returning `contradicted → reject` for the same proposal both passed. In V5 a validator that independently assesses `contradicted` derives `reject` and votes `False` against a leader claiming `supported → accept`, and vice versa — opposite assessments can no longer both pass. Within the review class, `partial` vs `insufficient` vs `ambiguous` all mean the same outcome (the evidence does not establish the requirement; a human must review), so requiring byte-identical labels there would make honest validators disagree constantly and stall consensus; the equivalence rule binds what matters (the decision and the assessment class) and tolerates immaterial wording-level variance inside one class.
 
 ### 5. Finalization in `compute()`
 
@@ -115,7 +132,7 @@ The validator returns a single boolean verdict: `True` only if all checks pass; 
 
 `compute()` then re-validates the result deterministically before assembling anything to store: it checks that `run_result` is a dict containing the required fields, that `quote_exists` is a boolean equal to the value `compute()` itself computed, and re-runs the shape and consistency checks. Only then are `evaluation_complete` and `review_required` computed, the final result dict assembled, the result stored as JSON in `TreeMap[str, str]`, and the dict returned.
 
-This section documents the contract code only. It does not state how the GenLayer runtime reacts when `validator_fn` returns `False`; that behavior is not established by this repository.
+When a validator returns `False`, GenLayer's documented behavior is leader rotation and retry; if consensus still cannot be reached the transaction goes undetermined and no state is modified. That runtime reaction has not yet been verified against a live V5 deployment (see FIX-SUMMARY.md); the local stub models it as a failed `compute()` with nothing stored, which is covered by the end-to-end disagreement test.
 
 ## Decision Logic
 
@@ -162,53 +179,68 @@ Both are computed deterministically inside `compute()` from the validated result
 
 ## Equivalence Principle
 
-GenLayer's equivalence principle requires nondeterministic code paths to be checkable by validators; this repository's code is written to keep the validator itself deterministic, so that a validator re-run on the same inputs produces the same verdict. What the code establishes:
+GenLayer's equivalence principle requires nondeterministic code paths to be checkable by validators. V4 kept the validator itself deterministic, which the Oct 31, 2026 rejection identified as the flaw: a validator that only checks output shape "is not performing consensus" (GenLayer Equivalence Principle documentation). **V5 makes the validator intentionally nondeterministic**: each validator re-runs the same LLM task as the leader and consensus is over the bound (assessment, decision) pair. What the code establishes:
 
 1. **Deterministic fields**: `quote_exists`, `input_within_limit`, `evaluation_complete`, `review_required` are computed deterministically inside `compute()` from the inputs, not from LLM output.
-2. **The LLM supplies evidence fields only**: `evidence_assessment`, `semantic_relevance`, `evidence_found`, and `explanation` are produced by the LLM. The validator checks their structure, allowed values, and internal consistency against the decision table; `explanation` is type/length checked only. No code in this contract compares LLM outputs across runs or across validators, and the contract does not claim to prove equivalence at the runtime level.
-3. **Decision derived locally**: The `decision` field is never returned by the LLM; it is computed by the contract from the evidence fields using a deterministic table.
+2. **The LLM supplies evidence fields only**: `evidence_assessment`, `semantic_relevance`, `evidence_found`, and `explanation` are produced by the LLM — once by the leader, and once independently by each validator, using the same shared prompt (`_build_assessment_prompt`) and the same shared parsing/validation (`_parse_assessment`). The validator compares only the stable decision fields (its own derived decision and its own `evidence_assessment`, with review-class equivalence); `explanation` free text is never compared, following GenLayer's "partial field matching" pattern.
+3. **Decision derived locally**: The `decision` field is never returned by the LLM; it is computed by the contract from the evidence fields using a deterministic table — identically on the leader side and on each validator side.
 
-What this section does not claim: that all validator outputs are identical across validators (the contract defines a single validator and no code compares validator outputs), or that the runtime provides specific consensus guarantees.
+What this section does not claim: that all validator outputs are identical across validators (LLM wording variance is expected and is why review-class equivalence exists), or that the runtime provides specific consensus guarantees beyond its documented leader-rotation behavior.
 
 ## Testing Results
 
-### Deterministic Tests — Executed (Python standard-library `unittest`)
+### Local Tests — Executed (V5, Python standard-library `unittest`)
 
-Executed with `python -m unittest -v tests.test_pev_direct` (from the repository root). **Total: 10 tests — 6 passed, 0 failed, 4 errors, 0 skipped.**
+Executed with `python -m unittest tests.test_pev_direct tests.test_pev_v5_validator` (from the repository root, Python 3.12.3, 2026-11-21). **Total: 32 tests — 32 passed, 0 failed, 0 errors, 0 skipped.**
 
-The 6 passing tests do not require the GenLayer runtime and do not import the contract:
+The contract imports the `genlayer` package, which is not installable locally (the `genlayer` package on PyPI is an intentionally empty placeholder, and `gltest` is not published on PyPI at all). The tests therefore run against a stdlib-only stub (`tests/genlayer_stub.py`) injected into `sys.modules` before the contract is imported. The stub provides no-op `gl.public` decorators, a plain-dict `evaluations` store, `gl.vm.UserError` / `gl.vm.Return`, a scripted `gl.nondet.exec_prompt` (responses served from a test-controlled queue, every prompt recorded), and a `gl.vm.run_nondet_unsafe` that runs the leader then the validator and raises on a `False` verdict (modelling "no consensus, no state modified"). The stub is test tooling only and is not part of the deployed contract.
 
-| # | Test | What it tests | Result |
-|---|------|---------------|--------|
-| 1 | `test_quote_exists_true` | Substring logic mirroring the `quote_exists` computation in `compute()` | PASS |
-| 2 | `test_quote_exists_false` | Substring logic mirroring the `quote_exists` computation in `compute()` | PASS |
-| 3 | `test_empty_quote` | Empty-quote case mirroring the `quote_exists` computation | PASS |
-| 4 | `test_input_within_limit` | Length-limit comparison mirroring `input_within_limit` | PASS |
-| 5 | `test_evaluation_complete_from_fields` | Illustrative re-implementation of a field-presence check (see note 3) | PASS |
-| 6 | `test_evaluation_complete_missing_field` | Illustrative re-implementation of a field-presence check (see note 3) | PASS |
+| Suite | Tests | Result |
+|-------|-------|--------|
+| `tests/test_pev_direct.py` — deterministic logic + decision table | 10 | All pass. The 4 decision-table tests were fixed in V5: V4 called `contract._compute_decision(...)`, but `_compute_decision` is a module-level function, not a method; they now import it directly. |
+| `tests/test_pev_v5_validator.py` — rejection scenarios + end-to-end | 22 | All pass. See below. |
+
+**V5 rejection-scenario tests (22):**
+
+| # | Test | What it proves | Result |
+|---|------|----------------|--------|
+| 1 | `test_opposite_supported_leader_contradicted_validator` | Leader `supported → accept` vs validator `contradicted → reject`: validator False (the exact rejected failure mode) | PASS |
+| 2 | `test_opposite_contradicted_leader_supported_validator` | Reverse direction: validator False | PASS |
+| 3 | `test_agreement_accept` | Both `supported → accept`: True | PASS |
+| 4 | `test_agreement_reject` | Both `contradicted → reject`: True | PASS |
+| 5 | `test_agreement_reject_irrelevant` | Both `irrelevant → reject`: True | PASS |
+| 6 | `test_review_class_partial_vs_insufficient` | Leader `partial → review`, validator `insufficient → review`: True | PASS |
+| 7 | `test_review_class_insufficient_vs_ambiguous` | Leader `insufficient → review`, validator `ambiguous → review`: True | PASS |
+| 8 | `test_review_vs_decisive_disagrees` | Leader `partial → review`, validator `supported → accept`: False | PASS |
+| 9 | `test_supported_review_vs_partial_review_disagrees` | Both derive `review`, but leader says `supported` and validator says `partial`: False (`supported` is not in the review class) | PASS |
+| 10 | `test_validator_malformed_json` | Validator's own LLM returns malformed JSON: False | PASS |
+| 11 | `test_validator_missing_field` | Validator's own LLM omits `evidence_found`: False | PASS |
+| 12 | `test_validator_invalid_enum` | Validator's own LLM returns an invalid assessment label: False | PASS |
+| 13 | `test_leader_decision_inconsistent_with_table` | Leader decision contradicts the table: False, and no LLM call is issued (structural failure short-circuits) | PASS |
+| 14 | `test_quote_exists_mismatch` | Leader `quote_exists` differs from `compute()`'s value: False | PASS |
+| 15 | `test_leader_result_not_a_return` | Leader result not wrapped in `gl.vm.Return`: False | PASS |
+| 16 | `test_leader_supported_without_evidence_found` | Leader `supported` + `evidence_found=False` fails the cross-field rule: False | PASS |
+| 17 | `test_leader_missing_quote_exists` | Leader result without `quote_exists`: False | PASS |
+| 18 | `test_agreement_stores_evaluation` | End-to-end agreement: `compute()` stores and `get_evaluation` returns the result | PASS |
+| 19 | `test_leader_and_validator_prompts_identical` | Leader and validator prompts are byte-identical (same shared prompt) | PASS |
+| 20 | `test_disagreement_stores_nothing` | End-to-end disagreement: `compute()` fails, nothing stored | PASS |
+| 21 | `test_review_class_agreement_end_to_end` | Leader `partial`, validator `insufficient`: stored as `review` | PASS |
+| 22 | `test_get_evaluation_unknown_id` | Unknown proposal_id returns `None` | PASS |
 
 **Execution notes:**
 
-1. Command: `python -m unittest -v tests.test_pev_direct` (single local run in this environment; no CI or automated execution artifact is committed to the repository).
-2. The six passing tests are self-contained deterministic-logic tests.
-3. Tests 5 and 6 are **illustrative re-implementations**, not direct contract tests: they re-implement the check as a field-presence test (`is not None`) and do **not** import or exercise the contract's actual `evaluation_complete` logic, which checks allowed values (e.g. `evidence_assessment in ALLOWED_STATUSES`), not mere presence.
+1. Command: `python -m unittest tests.test_pev_direct tests.test_pev_v5_validator` (single local run in this environment; no CI or automated execution artifact is committed to the repository). `python -m unittest discover -s tests` gives the same 32/32 result.
+2. Tests 5 and 6 of `test_pev_direct.py` (`test_evaluation_complete_*`) remain **illustrative re-implementations**: they re-implement a field-presence check and do **not** import or exercise the contract's actual `evaluation_complete` logic.
+3. The stub models validator disagreement as a failed `compute()`; the real runtime rotates the leader and retries, and only goes undetermined if consensus cannot be reached. The observable local outcome is the same (nothing stored), but the live-network reaction still needs verification against a deployed V5 contract (see FIX-SUMMARY.md).
 
-### Tests Errored at Import (require the `genlayer` package) — 4 errors, not logical failures
-
-The following 4 tests **errored at import** and did not reach their decision-table logic:
-
-- `test_compute_decision_accept`
-- `test_compute_decision_reject_contradicted`
-- `test_compute_decision_reject_irrelevant`
-- `test_compute_decision_review`
-
-Each fails at `from contracts.pev_contract import PEVContract`, which triggers `from genlayer import *` (contract line 4) and raises `ModuleNotFoundError: No module named 'genlayer'`. This is a **missing-dependency error at import time** — it is **neither a logical failure nor a pass** of the `_compute_decision` decision table. The decision-table logic itself was not executed in this environment.
-
-### Manual GenLayer Studio Tests — Executed Results
+### Manual GenLayer Studio Tests — Executed Results (V4)
 
 The 13 planned Studio cases have now been exercised against the deployed V4
 contract. Detailed observed outputs and limitations are recorded in the
-**Manual GenLayer Studio Results (PEV-M01–PEV-M13)** section below.
+**Manual GenLayer Studio Results (PEV-M01–PEV-M13)** section below. V5 adds
+new Studio cases M14–M16 (opposite-assessment disagreement, review-class
+equivalence, validator malformed-output disagreement) in
+`docs/manual_studio_test_plan.md`; they are unexecuted until V5 is deployed.
 
 Summary:
 - M01–M08: successful execution and expected observed decisions.
@@ -221,11 +253,11 @@ Summary:
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Deterministic local tests | 6 | Passed; two are illustrative re-implementations, not direct contract tests |
-| Contract-import tests | 4 | Errored at import because `genlayer` is unavailable; decision-table logic not executed |
-| Manual Studio cases | 13 | Executed; M01–M08 and M12 passed, M09–M10 unverified, M11 target unverified, M13 expectation mismatch |
+| Local tests (`test_pev_direct.py` + `test_pev_v5_validator.py`) | 32 | All pass (V5, 2026-11-21); two `test_pev_direct.py` tests are illustrative re-implementations, not direct contract tests |
+| Manual Studio cases (V4, M01–M13) | 13 | Executed against V4; M01–M08 and M12 passed, M09–M10 unverified, M11 target unverified, M13 expectation mismatch |
+| Manual Studio cases (V5, M14–M16) | 3 | Planned in `docs/manual_studio_test_plan.md`; unexecuted until V5 is deployed |
 
-**Test framework**: Python standard-library `unittest` (`tests/test_pev_direct.py`).
+**Test framework**: Python standard-library `unittest` (`tests/test_pev_direct.py`, `tests/test_pev_v5_validator.py`, stub `tests/genlayer_stub.py`).
 
 ## Installation and Usage
 
@@ -277,6 +309,7 @@ print(result)
 4. **Single requirement per evaluation**: Each `compute()` call evaluates one requirement against one proposal.
 5. **No batch evaluation**: Multiple requirements require multiple contract calls.
 6. **LLM-based semantic evaluation**: The `evidence_assessment`, `semantic_relevance`, and `evidence_found` fields are produced by an LLM and may vary between executions; they are validated for structure and consistency but not for factual correctness.
+7. **V5 validator cost**: every validator now issues its own LLM call per `compute()` (that is the intended GenLayer comparative model — 5 validators, 5 independent assessments — and is what makes the vote carry judgment). The V5 validator's live-network behavior (leader rotation on a majority-False verdict) is documented, not yet empirically verified.
 
 ## License
 
@@ -289,6 +322,8 @@ The license for this project has not been determined. No LICENSE file is include
 
 All cases below were executed against the already deployed V4 contract.
 These are documentation-only test records; the deployed contract was not modified.
+V5 adds Studio cases M14–M16 in `docs/manual_studio_test_plan.md`; they apply
+to the new V5 deployment, not to V4.
 
 | Case | Scenario | Studio execution | Observed result | Assessment |
 |---|---|---|---|---|
