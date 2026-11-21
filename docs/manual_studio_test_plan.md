@@ -167,3 +167,73 @@ results. They do not change the deployed contract or the original test inputs.
 
 Do not count M09, M10, or the target behavior of M11 as verified passes.
 Do not count M13 as a full expected-behavior pass.
+
+## V5 Test Cases (M14–M16) — UNEXECUTED
+
+These cases apply to the V5 contract only and require a fresh V5 deployment.
+They are the Studio-level counterparts of the local rejection-scenario tests
+in `tests/test_pev_v5_validator.py`. Do not run them against the V4 deployment
+(V4's validator cannot produce a False verdict on semantic disagreement).
+
+### Test Case 14 (M14): Validator Disagreement on Opposite Assessments
+
+| Field | Value |
+|-------|-------|
+| requirement | System shall use AES-256 encryption |
+| proposal | We implement AES-256 encryption at rest. |
+| candidate_quote | AES-256 encryption at rest |
+
+**Expected:** In the Studio validator simulation panel, at least one validator
+verdict is `False` when its independent assessment disagrees with the
+leader's (assessment, decision) pair — e.g. a leader `supported → accept`
+against a validator `contradicted → reject`. The transaction should show
+leader rotation / retry, and if no majority agrees, the transaction goes
+undetermined with no evaluation stored for that proposal_id.
+
+**Success criterion:** a confirmed validator `False` verdict in the Studio
+panel, with the corresponding retry/undetermined outcome recorded. This is
+the case M11 could never demonstrate against V4.
+
+### Test Case 15 (M15): Review-Class Equivalence
+
+| Field | Value |
+|-------|-------|
+| requirement | System shall retain logs for 90 days |
+| proposal | We retain authentication logs for compliance. |
+| candidate_quote | We retain authentication logs for compliance. |
+
+**Expected:** `decision="review"`, and the transaction finalizes with
+MAJORITY_AGREE even when individual validators label the assessment
+differently within the review class (`partial` vs `insufficient` vs
+`ambiguous`).
+
+**Success criterion:** FINALIZED / SUCCESS / MAJORITY_AGREE with a stored
+`review` decision; the validator panel shows agreement despite differing
+review-class labels.
+
+### Test Case 16 (M16): Validator Malformed-Output Disagreement
+
+| Field | Value |
+|-------|-------|
+| requirement | Any valid input |
+| proposal | Any valid input |
+| candidate_quote | Any valid input |
+
+**Expected:** When a validator's own LLM call returns malformed JSON or
+missing fields, that validator votes `False` (disagree rather than agree on
+broken output). This is hard to force with ordinary inputs; it is covered
+locally by `test_validator_malformed_json`, `test_validator_missing_field`,
+and `test_validator_invalid_enum`, and in Studio it is verified
+opportunistically if a validator error appears in the panel during M14/M15
+runs.
+
+**Success criterion:** a validator `False` verdict attributed to its own
+malformed output, or a documented note that the scenario was not observed
+live (local tests remain the evidence).
+
+## V5 Retest Note
+
+M01–M08 and M12–M13 should be re-run against the V5 deployment: the decision
+table, deterministic checks, and stored result shape are unchanged, so their
+expected outcomes stand. M11's target (a confirmed validator-False verdict)
+is now genuinely testable via M14.
